@@ -1,3 +1,4 @@
 dist/
 src/hcq_script.js
 node_modules/
+.DS_Store

@@ -1,88 +1,282 @@
 window.addEventListener("DOMContentLoaded", async () => {
 	window.onbeforeunload = () => {};
 	const { ipcRenderer } = require("electron");
+	
+	// Expose API for Mode Select (index.html)
+	window.electronAPI = {
+		start: (obj) => ipcRenderer.send("start", obj),
+		ready: () => ipcRenderer.sendSync("ready"),
+	};
+
+    // Attempt to initialize Mode Select UI if script is ready
+    if (window.initModeSelectUI) {
+        try {
+            const initialSettings = ipcRenderer.sendSync("ready");
+            window.initModeSelectUI(initialSettings);
+        } catch(e) { console.error(e); }
+    }
+
 	const hcqLinks = [
-		{
-			url: "https://himaquest.com",
-			used: false,
-			id: 0,
-		},
-		{
-			url: "http://himaquest.com.",
-			used: false,
-			id: 1,
-		},
-		{
-			url: "http://www.himaquest.com",
-			used: false,
-			id: 2,
-		},
-		{
-			url: "http://www.himaquest.com.",
-			used: false,
-			id: 3,
-		},
-		{
-			url: "http://sub1.himaquest.com",
-			used: false,
-			id: 4,
-		},
-		{
-			url: "http://sub1.himaquest.com.",
-			used: false,
-			id: 5,
-		},
-		{
-			url: "http://sub2.himaquest.com",
-			used: false,
-			id: 6,
-		},
-		{
-			url: "http://sub2.himaquest.com.",
-			used: false,
-			id: 7,
-		},
-		{
-			url: "http://sub3.himaquest.com",
-			used: false,
-			id: 8,
-		},
-		{
-			url: "http://sub3.himaquest.com.",
-			used: false,
-			id: 9,
-		},
+		{ url: "https://himaquest.com", used: false, id: 0 },
+		{ url: "http://himaquest.com.", used: false, id: 1 },
+		{ url: "http://www.himaquest.com", used: false, id: 2 },
+		{ url: "http://www.himaquest.com.", used: false, id: 3 },
+		{ url: "http://sub1.himaquest.com", used: false, id: 4 },
+		{ url: "http://sub1.himaquest.com.", used: false, id: 5 },
+		{ url: "http://sub2.himaquest.com", used: false, id: 6 },
+		{ url: "http://sub2.himaquest.com.", used: false, id: 7 },
+		{ url: "http://sub3.himaquest.com", used: false, id: 8 },
+		{ url: "http://sub3.himaquest.com.", used: false, id: 9 },
 	];
-	const gameData = ipcRenderer.sendSync("startgame");
 
-	if (window.self === window.top && window.location.protocol === "file:") {
-		if (gameData.mode == "tab") {
-			const $ = window.jQuery;
+    let gameData = null;
+
+    ipcRenderer.on("init-game", (e, settings) => {
+        gameData = settings;
+        document.getElementById("view-mode-select").style.display = "none";
+        
+        if (gameData.mode == "tab") {
+            document.getElementById("view-tab-mode").style.display = "block";
+			// Initialize Tab Mode
+			initTabMode();
+        } else {
+            document.getElementById("view-window-mode").style.display = "block";
+			// Initialize Window Mode
+			initWindowMode();
+        }
+    });
+
+    // Generic Password Prompt Handler
+    ipcRenderer.on("prompt-password", (e, type) => { // type: 'export' or 'import'
+        const modal = document.getElementById("password-modal");
+        const title = document.getElementById("password-modal-title");
+        const input = document.getElementById("password-input");
+        const submitBtn = document.getElementById("password-submit-btn");
+        const closeBtn = document.getElementById("password-modal-close");
+        
+        if (!modal) return;
+        
+        title.textContent = type === 'export' ? "エクスポート用パスワード設定" : "インポート用パスワード入力";
+        input.value = "";
+        modal.style.display = "flex";
+        input.focus();
+        
+        const close = () => {
+            modal.style.display = "none";
+            ipcRenderer.send("password-result", { password: null }); // Cancelled
+            cleanup();
+        };
+        
+        const submit = () => {
+            const pwd = input.value;
+            if (!pwd) return alert("パスワードを入力してください");
+            modal.style.display = "none";
+            ipcRenderer.send("password-result", { password: pwd });
+            cleanup();
+        };
+        
+        const cleanup = () => {
+            closeBtn.onclick = null;
+            submitBtn.onclick = null;
+            input.onkeydown = null;
+            window.onclick = null; // Careful not to remove other listeners if any (though generic window.onclick is risky)
+        };
+        
+        closeBtn.onclick = close;
+        submitBtn.onclick = submit;
+        
+        input.onkeydown = (ev) => {
+            if (ev.key === "Enter") submit();
+            if (ev.key === "Escape") close();
+        };
+
+        // Re-bind window click for this modal specifically? 
+        // Logic in initTabMode sets window.onclick for split-modal. 
+        // We should be careful. Let's just use specific close button for now to avoid conflict or simple z-index check.
+    });
+
+	// Logic for Game Inside Iframe (himaquest.com)
+	if (location.origin.includes("himaquest.com")) {
+        try {
+		    gameData = ipcRenderer.sendSync("startgame");
+        } catch(e) {
+            console.error("Failed to sync game data", e);
+        }
+    }
+
+	// Logic for Shell (Main Window)
+    function initTabMode() {
+		if (window.self === window.top && window.location.protocol === "file:") {
+            // ... TAB LOGIC COPIED HERE ...
 			const f = {};
+			let activeTabId = null;
+			let splitTabId = null;
+			let isSplitMode = false;
+			let dragSrcEl = null;
+			let tabHistory = [];
 
-			f.tabClose = (e) => {
-				if (e.hasClass("active")) {
-					const next = e.next(".tab").length
-						? e.next(".tab")
-						: e.prev(".tab");
-					if (next.length) {
-						f.tabChange({ target: next });
+			const tabsContainer = document.getElementById("tabs");
+			const gameArea = document.getElementById("gamearea");
+			const tabAddBtn = document.getElementById("tabaddbtn");
+			const splitToggleBtn = document.getElementById("split-toggle-btn");
+			const gameAreaCover = document.getElementById("gamearea_cover");
+			const splitModal = document.getElementById("split-modal");
+			const splitTabList = document.getElementById("split-tab-list");
+			const closeModalSpan = document.querySelector(".close-modal");
+
+			// Helper Functions
+			const getTabEl = (id) => document.querySelector(`.tab[data-id="${id}"]`);
+			const getIframe = (id) => document.querySelector(`iframe[name="${id}"]`);
+			const getAllTabs = () => Array.from(document.querySelectorAll(".tab"));
+
+			// Open Modal
+			const openSplitModal = () => {
+				if (!splitModal) return;
+				
+				// Populate list
+				splitTabList.innerHTML = "";
+				const availableTabs = hcqLinks.filter(l => l.used && l.id !== activeTabId);
+				
+				if (availableTabs.length === 0) {
+					alert("分割表示できる他のタブがありません。");
+					return;
+				}
+
+				availableTabs.forEach(tab => {
+					const el = document.createElement("div");
+					el.className = "split-list-item";
+					const tabName = getTabEl(tab.id)?.querySelector(".name")?.textContent || `タブ${tab.id + 1}`;
+					el.innerHTML = `<div class="tab-icon">${tab.id + 1}</div><span>${tabName}</span>`;
+					el.onclick = () => {
+						splitTabId = tab.id;
+						isSplitMode = true;
+						splitModal.style.display = "none";
+						f.updateLayout();
+					};
+					splitTabList.appendChild(el);
+				});
+
+				splitModal.style.display = "flex";
+			};
+
+			if (closeModalSpan) {
+				closeModalSpan.onclick = () => {
+					splitModal.style.display = "none";
+				};
+			}
+
+			window.onclick = (event) => {
+				if (event.target == splitModal) {
+					splitModal.style.display = "none";
+				}
+			};
+
+			f.updateLayout = () => {
+				// Manage Iframe Visibility including Split View
+				const iframes = document.querySelectorAll("iframe");
+				iframes.forEach(iframe => {
+					iframe.style.display = "none";
+					iframe.style.order = "";
+				});
+
+				document.body.classList.remove("split-view");
+				const activeTabEl = activeTabId !== null ? getTabEl(activeTabId) : null;
+
+				if (activeTabId !== null) {
+					const activeIframe = getIframe(activeTabId);
+					if (activeIframe) {
+						activeIframe.style.display = "block";
+						activeIframe.style.order = "1"; // Active is always Left
 					}
 				}
-				const id = Number(e.attr("name"));
-				hcqLinks.find((n) => n.id == id).used = false;
-				e.closest(".tab").remove();
-				$(`iframe[name="${id}"]`).remove();
-				if (!hcqLinks.find((n) => n.used)) f.tabAdd();
+
+				if (isSplitMode && splitTabId !== null && splitTabId !== activeTabId) {
+					const splitIframe = getIframe(splitTabId);
+					if (splitIframe) {
+						splitIframe.style.display = "block";
+						document.body.classList.add("split-view");
+						splitIframe.style.order = "2"; // Split is always Right
+					}
+				}
+
+				// Updates UI Classes
+				getAllTabs().forEach(t => {
+					t.classList.remove("active");
+					t.classList.remove("split-target");
+				});
+				
+				if (activeTabEl) {
+					activeTabEl.classList.add("active");
+					document.title = `表示中のタブ：${activeTabEl.querySelector(".name").textContent}`;
+				}
+				
+				if (isSplitMode && splitTabId !== null) {
+					const splitTabEl = getTabEl(splitTabId);
+					if (splitTabEl) {
+						splitTabEl.classList.add("split-target");
+					}
+				}
+				
+				if (splitToggleBtn) {
+					splitToggleBtn.classList.toggle("active", isSplitMode);
+				}
 			};
-			f.tabChange = (e) => {
-				const id = Number($(e.target).closest(".tab").attr("name"));
-				$(".tab").removeClass("active");
-				$(e.target).closest(".tab").addClass("active");
-				$("iframe").hide();
-				$(`iframe[name="${id}"]`).show();
-				document.title = `表示中のタブ：${$(e.target).closest(".tab").find(".name").text()}`;
+
+			f.tabChange = (targetId) => {
+				if (targetId === null || targetId === undefined) return;
+				const newActiveId = Number(targetId);
+				
+				// Update History
+				tabHistory = tabHistory.filter(id => id !== newActiveId);
+				tabHistory.push(newActiveId);
+				
+				if (isSplitMode) {
+					if (newActiveId === splitTabId) {
+						// Clicked the split target -> Swap
+						splitTabId = activeTabId;
+					} 
+					// If clicked a third tab, it becomes active, split remains same.
+				}
+				
+				activeTabId = newActiveId;
+				f.updateLayout();
 			};
+
+			f.tabClose = (id) => {
+				id = Number(id);
+				const link = hcqLinks.find(n => n.id == id);
+				if (link) link.used = false;
+
+				// Remove from history
+				tabHistory = tabHistory.filter(hId => hId !== id);
+
+				// If the closed tab is part of the split view, exit split mode
+				if (isSplitMode && (id === activeTabId || id === splitTabId)) {
+					isSplitMode = false;
+					splitTabId = null;
+				}
+
+				const tab = getTabEl(id);
+				if (tab) tab.remove();
+
+				const iframe = getIframe(id);
+				if (iframe) iframe.remove();
+				
+				if (activeTabId === id) {
+					// Switch to nearest tab (DOM order)
+					const tabs = getAllTabs();
+					if (tabs.length > 0) {
+						const lastTab = tabs[tabs.length - 1];
+						f.tabChange(Number(lastTab.dataset.id));
+					} else {
+						activeTabId = null;
+						f.tabAdd(); 
+					}
+				} else {
+					f.updateLayout();
+				}
+			};
+
 			f.tabAdd = () => {
 				const d = hcqLinks.find((n) => !n.used);
 				if (!d) {
@@ -90,216 +284,422 @@ window.addEventListener("DOMContentLoaded", async () => {
 					return;
 				}
 				d.used = true;
-				$("#tabs").append(
-					`<div class="tab" name="${d.id}"><p><span class="name" style="left:10%">タブ${
-						d.id + 1
-					}</span><span class="close">×</span></p></div>`
-				);
-				$(`.tab[name="${d.id}"] p`).on("click", (e) => f.tabChange(e));
-				$(`.tab[name="${d.id}"] .close`).on("click", (e) => {
-					f.tabClose($(e.target).closest(".tab"));
+
+				// Create Tab Element
+				const tab = document.createElement("div");
+				tab.className = "tab";
+				tab.setAttribute("draggable", "true");
+				tab.setAttribute("data-id", d.id);
+				tab.innerHTML = `<span class="name" style="pointer-events: none;">タブ${d.id + 1}</span><span class="close">×</span>`; // Pointer events none on name to simplify drag
+
+				// Events
+				tab.addEventListener("click", (e) => {
+					if (e.target.classList.contains("close")) {
+						e.stopPropagation();
+						f.tabClose(d.id);
+					} else {
+						f.tabChange(d.id);
+					}
 				});
-				$("#gamearea").append(
-					`<iframe src="${d.url}" name="${d.id}"></iframe>`
-				);
-				const h = $(`iframe[name="${d.id}"]`);
-				f.tabChange({ target: $(`.tab[name="${d.id}"]`) });
+
+				// Drag & Drop
+				tab.addEventListener('dragstart', handleDragStart, false);
+				tab.addEventListener('dragenter', handleDragEnter, false);
+				tab.addEventListener('dragover', handleDragOver, false);
+				tab.addEventListener('dragleave', handleDragLeave, false);
+				tab.addEventListener('drop', handleDrop, false);
+				tab.addEventListener('dragend', handleDragEnd, false);
+
+				tabsContainer.appendChild(tab);
+
+				// Create Iframe
+				const iframe = document.createElement("iframe");
+				iframe.src = d.url;
+				iframe.name = d.id;
+				gameArea.appendChild(iframe);
+
+				f.tabChange(d.id);
 			};
-			$("#tabaddbtn")
-				.removeAttr("id")
-				.on("click", () => f.tabAdd());
 
-			$("#tabarea").on("wheel", (e) => {
-				if (
-					Math.abs(e.originalEvent.deltaY) <
-					Math.abs(e.originalEvent.deltaX)
-				)
-					return;
+			// Drag & Drop Handlers
+			function handleDragStart(e) {
+                console.log("Drag Start", this.dataset.id);
+				dragSrcEl = this;
+				e.dataTransfer.effectAllowed = 'move';
+				e.dataTransfer.setData('text/plain', this.dataset.id); // Firefox requires data
+				this.classList.add('dragging');
+                
+                // Disable pointer events on iframes to let the cover capture the drag
+                document.querySelectorAll("iframe").forEach(iframe => {
+                    iframe.style.pointerEvents = "none";
+                });
+                
+				if(gameAreaCover) {
+                    gameAreaCover.style.display = 'block'; // Ensure block display
+                    gameAreaCover.style.visibility = 'visible';
+                    gameAreaCover.style.pointerEvents = 'auto'; // Enable cover interaction
+                    console.log("Cover shown (pointer-events hack applied)");
+                }
+			}
 
-				const maxScrollLeft =
-					$("#tabs").get(0).scrollWidth -
-					$("#tabs").get(0).clientWidth;
+			function handleDragOver(e) {
+				if (e.preventDefault) e.preventDefault();
+				e.dataTransfer.dropEffect = 'move';
+				return false;
+			}
 
-				if (
-					($("#tabs").scrollLeft() <= 0 &&
-						e.originalEvent.deltaY < 0) ||
-					($("#tabs").scrollLeft() >= maxScrollLeft &&
-						e.originalEvent.deltaY > 0)
-				)
-					return;
+			function handleDragEnter(e) {
+				this.classList.add('over');
+                
+                // Live Swap Logic
+                if (dragSrcEl && dragSrcEl !== this && this.classList.contains('tab')) {
+					// Reorder DOM immediately
+					const tabs = getAllTabs();
+					const srcIndex = tabs.indexOf(dragSrcEl);
+					const targetIndex = tabs.indexOf(this);
+					
+					if (srcIndex < targetIndex) {
+						this.parentNode.insertBefore(dragSrcEl, this.nextSibling);
+					} else {
+						this.parentNode.insertBefore(dragSrcEl, this);
+					}
+                }
+			}
 
-				e.preventDefault();
-				$("#tabs").scrollLeft(
-					$("#tabs").scrollLeft() + e.originalEvent.deltaY
-				);
-			});
+			function handleDragLeave(e) {
+				this.classList.remove('over');
+			}
 
+			function handleDrop(e) {
+				if (e.stopPropagation) e.stopPropagation();
+                // Logic moved to dragEnter for live sorting.
+                // drop just acts as "commit" (which is implicit since we moved DOM)
+				return false;
+			}
+
+			function handleDragEnd(e) {
+                console.log("Drag End");
+				this.classList.remove('dragging');
+				getAllTabs().forEach(t => t.classList.remove('over'));
+
+                // Restore iframes
+                document.querySelectorAll("iframe").forEach(iframe => {
+                    iframe.style.pointerEvents = "";
+                });
+
+				if(gameAreaCover) {
+                    gameAreaCover.style.display = 'none'; // Hide
+                    gameAreaCover.style.visibility = 'hidden';
+                    gameAreaCover.style.pointerEvents = 'none';
+                    gameAreaCover.classList.remove('drag-over');
+                    gameAreaCover.style.backgroundColor = "transparent";
+                }
+			}
+            
+            // Drop on Game Area (Split View Trigger)
+            if (gameAreaCover) {
+                console.log("Adding listener to gameAreaCover");
+                gameAreaCover.addEventListener('dragenter', (e) => {
+                    console.log("Cover Enter - Applying Styles");
+                    e.preventDefault();
+                    // Just basic setup, actual highlight managed in dragover
+                    gameAreaCover.style.backgroundColor = "transparent"; 
+                });
+                
+                gameAreaCover.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move'; 
+                    
+                    const rect = gameAreaCover.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    
+                    // Remove both first
+                    gameAreaCover.classList.remove('drag-over-left');
+                    gameAreaCover.classList.remove('drag-over-right');
+                    
+                    // Logic: Ignore top 50px (Dead Zone)
+                    if (y < 50) {
+                         return false; 
+                    }
+
+                    if (x < rect.width / 2) {
+                        gameAreaCover.classList.add('drag-over-left');
+                    } else {
+                        gameAreaCover.classList.add('drag-over-right');
+                    }
+                    
+                    return false;
+                });
+                
+                gameAreaCover.addEventListener('dragleave', (e) => {
+                    gameAreaCover.classList.remove('drag-over-left');
+                    gameAreaCover.classList.remove('drag-over-right');
+                    gameAreaCover.style.backgroundColor = "transparent";
+                });
+                
+                gameAreaCover.addEventListener('drop', (e) => {
+                    console.log("Cover Drop");
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const droppedId = Number(e.dataTransfer.getData('text/plain'));
+                    
+                    const rect = gameAreaCover.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    const isLeft = x < rect.width / 2;
+
+                    // Ignroe Drop in Dead Zone
+                    if (y < 50) {
+                        gameAreaCover.classList.remove('drag-over-left');
+                        gameAreaCover.classList.remove('drag-over-right');
+                        return false;
+                    }
+
+                    if (!isNaN(droppedId)) {
+                        // Find a candidate to swap/fill the other side if needed
+                        // (Used tabs, excluding the dropped one)
+                        const candidateTab = hcqLinks.find(l => l.used && l.id !== droppedId);
+                        
+                        if (droppedId === activeTabId) {
+                            // Dragging the CURRENTLY DISPLAYED tab
+                            if (!candidateTab) {
+                                // Only one tab exists, cannot split
+                                alert("分割表示するには、少なくとも2つのタブが必要です。");
+                            } else {
+                                if (isLeft) {
+                                    // Dragged Active to Left (It's already left)
+                                    // User might want to split with candidate on right?
+                                    splitTabId = candidateTab.id; 
+                                    activeTabId = droppedId; 
+                                } else {
+                                    // Dragged Active to Right
+                                    // Active becomes candidate (Left), Dropped becomes Split (Right)
+                                    splitTabId = droppedId;
+                                    activeTabId = candidateTab.id;
+                                }
+                                isSplitMode = true;
+                                f.updateLayout();
+                            }
+                        } else {
+                            // Dragging a DIFFERENT tab (Background tab)
+                            if (isLeft) {
+                                // Dropped -> Left (Active)
+                                // Current Active -> Right (Split)
+                                splitTabId = activeTabId;
+                                activeTabId = droppedId;
+                            } else {
+                                // Dropped -> Right (Split)
+                                // Current Active -> Left (Stays Active)
+                                splitTabId = droppedId;
+                            }
+                            isSplitMode = true;
+                            f.updateLayout();
+                        }
+                    }
+                    
+                    gameAreaCover.classList.remove('drag-over-left');
+                    gameAreaCover.classList.remove('drag-over-right');
+                    gameAreaCover.style.backgroundColor = "transparent";
+                    return false;
+                });
+            } else {
+                console.error("gameAreaCover not found during init");
+            }
+
+			// Split View Toggle
+			if (splitToggleBtn) {
+				splitToggleBtn.addEventListener("click", () => {
+					if (isSplitMode) {
+						// Toggle OFF
+						isSplitMode = false;
+						f.updateLayout();
+					} else {
+						// Toggle ON -> Open Modal
+						openSplitModal();
+					}
+				});
+			}
+
+			if (tabAddBtn) tabAddBtn.addEventListener("click", () => f.tabAdd());
+
+			// Mouse Wheel Horizontal Scroll
+			const tabArea = document.getElementById("tabarea");
+			if (tabArea) {
+				tabArea.addEventListener("wheel", (e) => {
+					if (Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;
+					
+					// If inside tabs container
+					if (tabsContainer.contains(e.target) || e.target === tabsContainer) {
+						e.preventDefault();
+						tabsContainer.scrollLeft += e.deltaY;
+					}
+				});
+			}
+
+			// Keydown Events
 			f.keydownEvent = (e) => {
-				if (e.ctrlKey && e.key === "Tab") {
+				const isCmdOrCtrl = e.ctrlKey || e.metaKey;
+				if (isCmdOrCtrl && e.key === "Tab") {
 					e.preventDefault();
-					const activeTab = $(".tab.active");
-					const nextTab = activeTab.next(".tab").length
-						? activeTab.next(".tab")
-						: $(".tab").first();
-					const prevTab = activeTab.prev(".tab").length
-						? activeTab.prev(".tab")
-						: $(".tab").last();
-					return f.tabChange({
-						target: e.shiftKey ? prevTab : nextTab,
-					});
-				}
-				if (e.ctrlKey && e.key === "w") {
-					e.preventDefault();
-					return f.tabClose($(".tab.active"));
-				}
-				if (e.ctrlKey && e.key === "t") {
-					e.preventDefault();
-					return f.tabAdd();
-				}
-				if ((e.ctrlKey && e.key === "r") || e.key === "F5") {
-					e.preventDefault();
-					const activeTab = $(".tab.active");
-					const id = Number(activeTab.attr("name"));
-					$(`iframe[name="${id}"]`)
-						.removeAttr("src")
-						.attr("src", hcqLinks.find((n) => n.id == id).url);
+					const tabs = getAllTabs();
+					if (tabs.length === 0) return;
+					const currentIndex = tabs.findIndex(t => Number(t.dataset.id) === activeTabId);
+					let nextIndex = e.shiftKey ? currentIndex - 1 : currentIndex + 1;
+					
+					if (nextIndex >= tabs.length) nextIndex = 0;
+					if (nextIndex < 0) nextIndex = tabs.length - 1;
+					
+					f.tabChange(Number(tabs[nextIndex].dataset.id));
 					return;
 				}
-				if ((e.ctrlKey && e.key === "s") || e.key === "F1") {
+				if (isCmdOrCtrl && e.key === "w") {
 					e.preventDefault();
-					ipcRenderer.send("state", {
-						type: "partyReady",
-					});
+					if (activeTabId !== null) f.tabClose(activeTabId);
 					return;
 				}
-				if ((e.ctrlKey && e.key === "b") || e.key === "F2") {
+				if (isCmdOrCtrl && e.key === "t") {
 					e.preventDefault();
-					ipcRenderer.send("state", {
-						type: "exitField",
-					});
+					f.tabAdd();
+					return;
+				}
+				if ((isCmdOrCtrl && e.key === "r") || e.key === "F5") {
+					e.preventDefault();
+					if (activeTabId !== null) {
+						const iframe = getIframe(activeTabId);
+						const link = hcqLinks.find(n => n.id == activeTabId);
+						if (iframe && link) {
+							iframe.src = link.url;
+						}
+					}
+					return;
+				}
+				if ((isCmdOrCtrl && e.key === "s") || e.key === "F1") {
+					e.preventDefault();
+					ipcRenderer.send("state", { type: "partyReady" });
+					return;
+				}
+				if ((isCmdOrCtrl && e.key === "b") || e.key === "F2") {
+					e.preventDefault();
+					ipcRenderer.send("state", { type: "exitField" });
 					return;
 				}
 			};
-			$(document).on("keydown", f.keydownEvent);
+			document.addEventListener("keydown", f.keydownEvent);
 
+			// IPC Listeners
 			ipcRenderer.on("tabAdd", () => f.tabAdd());
-			ipcRenderer.on("tabClose", (e, d) => f.tabClose($(".tab.active")));
-			ipcRenderer.on("tabChange", (e, d) => {
-				const activeTab = $(".tab.active");
-				const nextTab = activeTab.next(".tab").length
-					? activeTab.next(".tab")
-					: $(".tab").first();
-				const prevTab = activeTab.prev(".tab").length
-					? activeTab.prev(".tab")
-					: $(".tab").last();
-				return f.tabChange({ target: d ? prevTab : nextTab });
+			ipcRenderer.on("tabClose", () => { if (activeTabId !== null) f.tabClose(activeTabId); });
+			ipcRenderer.on("tabChange", (e, reverse) => {
+				const tabs = getAllTabs();
+				if (tabs.length === 0) return;
+				const currentIndex = tabs.findIndex(t => Number(t.dataset.id) === activeTabId);
+				let nextIndex = reverse ? currentIndex - 1 : currentIndex + 1;
+				
+				if (nextIndex >= tabs.length) nextIndex = 0;
+				if (nextIndex < 0) nextIndex = tabs.length - 1;
+				
+				f.tabChange(Number(tabs[nextIndex].dataset.id));
 			});
-			ipcRenderer.on("tabReload", (e, d) => {
-				const activeTab = $(".tab.active");
-				const id = Number(activeTab.attr("name"));
-				$(`iframe[name="${id}"]`)
-					.removeAttr("src")
-					.attr("src", hcqLinks.find((n) => n.id == id).url);
+			ipcRenderer.on("tabReload", () => {
+				if (activeTabId !== null) {
+					const iframe = getIframe(activeTabId);
+					const link = hcqLinks.find(n => n.id == activeTabId);
+					if (iframe && link) iframe.src = link.url;
+				}
 			});
 			ipcRenderer.on("nameChange", (e, { id, name }) => {
-				const tab = $(`.tab[name="${id}"]`);
-				if (tab.length) {
-					tab.find(".name")
-						.html(name != null ?`${name} のタブ` : `タブ${id + 1}`)
-						.css({
-							left: name != null ? "3%" : "10%",
-							"font-size": name != null ? "0.45em" : null,
-						});
-				}
-			})
-			f.tabAdd();
-			
-			$("#tabs").sortable({
-				axis: "x",
-				placeholder: "tab-placeholder",
-				items: ".tab",
-				opacity: 0.5,
-				tolerance: "pointer",
-				containment: "#tabs",
-				revert: 300,
-				start: () => {
-					$("#gamearea_cover").show();
-				},
-				stop: () => {
-					$("#gamearea_cover").hide();
+				const tab = getTabEl(id);
+				if (tab) {
+					const nameSpan = tab.querySelector(".name");
+					if (nameSpan) {
+						nameSpan.textContent = name != null ? `${name} のタブ` : `タブ${id + 1}`;
+						nameSpan.style.fontSize = name != null ? "0.8em" : null; // Adjusted font size for readability
+					}
 				}
 			});
-		} else if (gameData.mode == "window" && window.location.protocol === "file:") {
-			const $ = window.jQuery;
-			const DOM = hcqLinks
-				.slice(0, Number(gameData.windowCount))
-				.map((n) => `<iframe src="${n.url}"></iframe>`);
-			$("#gamearea").html(DOM);
-			switch (Number(gameData.windowCount)) {
-				case 2:
-					$("#gamearea").css({
-						"grid-template-columns":
-							gameData.type == "a" ? "1fr" : "1fr 1fr",
-						"grid-template-rows": gameData.type == "a" ? "1fr 1fr" : "1fr",
-					});
-					break;
-				case 3:
-					$("#gamearea").css({
-						"grid-template-columns":
-							gameData.type == "a" ? "1fr" : "1fr 1fr 1fr",
-						"grid-template-rows":
-							gameData.type == "a" ? "1fr 1fr 1fr" : "1fr",
-					});
-					break;
-				case 4:
-					$("#gamearea").css({
-						"grid-template-columns":
-							gameData.type == "a" ? "1fr 1fr" : "1fr 1fr 1fr 1fr",
-						"grid-template-rows": gameData.type == "a" ? "1fr 1fr" : "1fr",
-					});
-					break;
-				case 5:
-					$("#gamearea").css({
-						"grid-template-columns": "1fr 1fr 1fr",
-						"grid-template-rows": "1fr 1fr",
-					});
-					$("iframe:eq(0)").css("grid-row", "span 2");
-					break;
-				case 6:
-					$("#gamearea").css({
-						"grid-template-columns": "1fr 1fr 1fr",
-						"grid-template-rows": "1fr",
-					});
-					break;
-				case 7:
-					$("#gamearea").css({
-						"grid-template-columns": "1fr 1fr 1fr 1fr",
-						"grid-template-rows": "1fr 1fr",
-					});
-					$("iframe:eq(0)").css("grid-row", "span 2");
-					break;
-				case 8:
-					$("#gamearea").css({
-						"grid-template-columns": "1fr 1fr 1fr 1fr",
-						"grid-template-rows": "1fr 1fr",
-					});
-					break;
-				case 9:
-					$("#gamearea").css({
-						"grid-template-columns": "1fr 1fr 1fr",
-						"grid-template-rows": "1fr 1fr 1fr",
-					});
-					break;
-				case 10:
-					$("#gamearea").css({
-						"grid-template-columns": "1fr 1fr 1fr 1fr 1fr",
-						"grid-template-rows": "1fr 1fr",
-					});
-					break;
-			}
-		}
-		return;
+
+			// Initialize first tab
+			f.tabAdd();
+
+		} 
 	}
+
+    function initWindowMode() {
+        if (window.self === window.top && window.location.protocol === "file:") {
+            const $ = window.jQuery;
+            const DOM = hcqLinks
+                .slice(0, Number(gameData.windowCount))
+                .map((n) => `<iframe src="${n.url}"></iframe>`);
+            $("#gamearea-window").html(DOM); // Updated ID
+            const $ga = $("#gamearea-window"); // Updated ID
+            
+            switch (Number(gameData.windowCount)) {
+                case 2:
+                    $ga.css({
+                        "grid-template-columns":
+                            gameData.type == "a" ? "1fr" : "1fr 1fr",
+                        "grid-template-rows": gameData.type == "a" ? "1fr 1fr" : "1fr",
+                    });
+                    break;
+                case 3:
+                    $ga.css({
+                        "grid-template-columns":
+                            gameData.type == "a" ? "1fr" : "1fr 1fr 1fr",
+                        "grid-template-rows":
+                            gameData.type == "a" ? "1fr 1fr 1fr" : "1fr",
+                    });
+                    break;
+                case 4:
+                    $ga.css({
+                        "grid-template-columns":
+                            gameData.type == "a" ? "1fr 1fr" : "1fr 1fr 1fr 1fr",
+                        "grid-template-rows": gameData.type == "a" ? "1fr 1fr" : "1fr",
+                    });
+                    break;
+                case 5:
+                    $ga.css({
+                        "grid-template-columns": "1fr 1fr 1fr",
+                        "grid-template-rows": "1fr 1fr",
+                    });
+                    $("iframe:eq(0)").css("grid-row", "span 2");
+                    break;
+                case 6:
+                    $ga.css({
+                        "grid-template-columns": "1fr 1fr 1fr",
+                        "grid-template-rows": "1fr",
+                    });
+                    break;
+                case 7:
+                    $ga.css({
+                        "grid-template-columns": "1fr 1fr 1fr 1fr",
+                        "grid-template-rows": "1fr 1fr",
+                    });
+                    $("iframe:eq(0)").css("grid-row", "span 2");
+                    break;
+                case 8:
+                    $ga.css({
+                        "grid-template-columns": "1fr 1fr 1fr 1fr",
+                        "grid-template-rows": "1fr 1fr",
+                    });
+                    break;
+                case 9:
+                    $ga.css({
+                        "grid-template-columns": "1fr 1fr 1fr",
+                        "grid-template-rows": "1fr 1fr 1fr",
+                    });
+                    break;
+                case 10:
+                    $ga.css({
+                        "grid-template-columns": "1fr 1fr 1fr 1fr 1fr",
+                        "grid-template-rows": "1fr 1fr",
+                    });
+                    break;
+            }
+        }
+    }
+
+
 	if (!new URL(location.href).origin.includes("himaquest.com")) return;
 	document.body.style.display = "none";
 

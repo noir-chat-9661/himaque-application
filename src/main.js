@@ -129,7 +129,6 @@ let masterkey = "";
 const password = store.get("password") || [];
 
 const crypto = require("crypto");
-const { get } = require("http");
 
 function addPassword(data, place = password.length) {
 	const { password: pass } = data;
@@ -339,141 +338,78 @@ autoUpdater.on("error", () => {
 function start() {
 	mainWindow = null;
 	c2 = 0;
+	// Initialize sizes if missing
 	if (!setting.size)
 		setting.size = {
-			modeSelect: {
-				width: 800,
-				height: 600,
-				maximized: false,
-			},
-			main: {
-				width: 960,
-				height: 720,
-				maximized: false,
-			},
+			modeSelect: { width: 800, height: 600, maximized: false },
+			main: { width: 960, height: 720, maximized: false },
 		};
-	const modeSelectWindow = new BrowserWindow({
+
+	// Create the single main window
+	mainWindow = new BrowserWindow({
 		width: setting.size.modeSelect.width || 800,
 		height: setting.size.modeSelect.height || 600,
 		show: false,
 		webPreferences: {
 			devTools: !app.isPackaged,
-			preload: path.join(__dirname, "preload_ModeSelect.js"),
+			preload: path.join(__dirname, "preload.js"),
+			contextIsolation: false,
+			nodeIntegration: false,
+			nodeIntegrationInSubFrames: true,
+			allowRunningInsecureContent: true,
+			webSecurity: false,
 		},
 	});
-	nowWindow = modeSelectWindow;
-	if (!app.isPackaged) modeSelectWindow.webContents.openDevTools();
+	// global reference
+	if (typeof nowWindow !== 'undefined') nowWindow = mainWindow; // Assuming nowWindow is used elsewhere
 
-	app.once("activate", () => {
-		if (!BrowserWindow.getAllWindows().length) createWindow();
+	if (!app.isPackaged) mainWindow.webContents.openDevTools();
+
+	mainWindow.loadFile(path.join(__dirname, "index.html"));
+
+	mainWindow.once("ready-to-show", () => {
+		mainWindow.show();
+		if (setting.size.modeSelect.maximized) mainWindow.maximize();
 	});
-	modeSelectWindow.loadFile(path.join(__dirname, "ModeSelect.html"));
-	modeSelectWindow.once("ready-to-show", () => {
-		if (versionChecked) {
-			modeSelectWindow.show();
-			if (setting.size.modeSelect.maximized)
-				modeSelectWindow.maximize();
-		} else {
-			autoUpdater.on("update-not-available", () => {
-				modeSelectWindow.show();
-				if (setting.size.modeSelect.maximized)
-					modeSelectWindow.maximize();
-			});
-			autoUpdater.on("update-cancelled", () => {
-				modeSelectWindow.show();
-				if (setting.size.modeSelect.maximized)
-					modeSelectWindow.maximize();
-			});
-			autoUpdater.on("error", () => {
-				modeSelectWindow.show();
-				if (setting.size.modeSelect.maximized)
-					modeSelectWindow.maximize();
-			});
-		}
-	});
-	modeSelectWindow.once("close", () => {
-		if (c1) return;
-		if (process.platform === "darwin") return;
-		if (modeSelectWindow.isMaximized()) {
-			setting.size.modeSelect.maximized = true;
-		} else {
-			setting.size.modeSelect.maximized = false;
-			setting.size.modeSelect.width =
-				modeSelectWindow.getBounds().width;
-			setting.size.modeSelect.height =
-				modeSelectWindow.getBounds().height;
-		}
+
+	mainWindow.on("close", () => {
+        if (c2) return;
 		app.exit();
 	});
-	modeSelectWindow.webContents.on("did-create-window", (w, e) => {
-		w.setMenuBarVisibility(false);
-	});
-	modeSelectWindow.setMenuBarVisibility(false);
-	ipcMain.once("start", (e, obj) => {
-		c1 = 1;
-		if (modeSelectWindow.isMaximized()) {
-			setting.size.modeSelect.maximized = true;
-		} else {
-			setting.size.modeSelect.maximized = false;
-			setting.size.modeSelect.width =
-				modeSelectWindow.getBounds().width;
-			setting.size.modeSelect.height =
-				modeSelectWindow.getBounds().height;
-		}
-		modeSelectWindow.close();
-
-		mainWindow = new BrowserWindow({
-			width: setting.size.main.width,
-			height: setting.size.main.height,
-			show: false,
-			webPreferences: {
-				devTools: !app.isPackaged,
-				preload: path.join(__dirname, "preload.js"),
-				contextIsolation: false,
-				nodeIntegration: false,
-				nodeIntegrationInSubFrames: true,
-				allowRunningInsecureContent: true,
-				webSecurity: false,
-			},
-		});
-		nowWindow = mainWindow;
-
-		if (!app.isPackaged) mainWindow.webContents.openDevTools();
-
-		setting.windowCount = obj.windowCount;
-		setting.addon = obj.addon;
-		setting.type = obj?.type || "a";
-		setting.addonModules = obj.addonModules;
-		setting.mode = obj.mode;
-
-		for (let i = 0; i < hcqLinks.length; i++) hcqLinks[i].name = null;
-		store.set("setting", setting);
-
-		mainWindow.loadFile(path.join(__dirname, `${obj.mode}.html`));
-
-		mainWindow.once("ready-to-show", () => {
-			mainWindow.show();
-			if (setting.size.main.maximized) mainWindow.maximize();
-			isMainWindow = true;
-		});
-		mainWindow.on("close", () => {
-			isMainWindow = false;
-			if (c2) return;
-			if (process.platform === "darwin") return;
-			if (mainWindow.isMaximized()) {
-				setting.size.main.maximized = true;
-			} else {
-				setting.size.main.maximized = false;
-				setting.size.main.width = mainWindow.getBounds().width;
-				setting.size.main.height = mainWindow.getBounds().height;
-			}
-			app.exit();
-		});
-		mainWindow.webContents.once("did-create-window", (w, e) => {
-			w.setMenuBarVisibility(false);
-		});
-	});
 }
+
+// Handle "start" command from renderer (Mode Selection -> Game)
+ipcMain.on("start", (e, obj) => {
+    if (!mainWindow) return;
+
+    // Update settings
+    setting.windowCount = obj.windowCount;
+    setting.addon = obj.addon;
+    setting.type = obj?.type || "a";
+    setting.addonModules = obj.addonModules;
+    setting.mode = obj.mode;
+    
+    // Reset names
+    for (let i = 0; i < hcqLinks.length; i++) hcqLinks[i].name = null;
+    store.set("setting", setting);
+
+    // Save ModeSelect size before resizing?
+    // setting.size.modeSelect.width = mainWindow.getBounds().width;
+    // ...
+
+    // Resize to Main Size
+    if (setting.size.main.maximized) {
+        mainWindow.maximize();
+    } else {
+        mainWindow.setSize(setting.size.main.width || 960, setting.size.main.height || 720);
+        mainWindow.center();
+    }
+    
+    isMainWindow = true; // Mark as Game Running
+
+    // Tell renderer to switch UI
+    mainWindow.webContents.send("init-game", setting);
+});
 
 ipcMain.on("startgame", (e) => {
 	return (e.returnValue = {
@@ -489,6 +425,119 @@ ipcMain.on("startgame", (e) => {
 app.on("quit", () => {
 	store.set("setting", setting);
 });
+
+const fs = require("fs");
+
+// Helper to prompt password
+function promptPassword(type) {
+    return new Promise((resolve) => {
+        if (!mainWindow) return resolve(null);
+        mainWindow.webContents.send("prompt-password", type);
+        ipcMain.once("password-result", (e, res) => {
+            resolve(res.password);
+        });
+    });
+}
+
+async function exportPasswords() {
+    const password = await promptPassword('export');
+    if (!password) return; // Cancelled
+
+    const data = getPassword(); // Decrypted list
+    const json = JSON.stringify(data);
+    
+    // Encrypt JSON with provided password
+    try {
+        const salt = crypto.randomBytes(16);
+        const key = crypto.scryptSync(password, salt, 32);
+        const iv = crypto.randomBytes(12);
+        const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+        const encrypted = Buffer.concat([cipher.update(json, 'utf8'), cipher.final()]);
+        const tag = cipher.getAuthTag();
+        
+        // Format: salt:iv:tag:encrypted (base64)
+        const output = [
+            salt.toString('base64'),
+            iv.toString('base64'),
+            tag.toString('base64'),
+            encrypted.toString('base64')
+        ].join(':');
+
+        dialog.showSaveDialog(mainWindow, {
+            title: "パスワードをエクスポート",
+            defaultPath: "meteor_passwords.dat",
+            filters: [{ name: "Meteor Data", extensions: ["dat"] }]
+        }).then(result => {
+            if (!result.canceled && result.filePath) {
+                fs.writeFileSync(result.filePath, output, "utf-8");
+                dialog.showMessageBox(mainWindow, { message: "暗号化してエクスポートしました。" });
+            }
+        });
+
+    } catch (e) {
+        console.error(e);
+        dialog.showErrorBox("エラー", "暗号化に失敗しました。");
+    }
+}
+
+async function importPasswords() {
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+        title: "パスワードをインポート",
+        filters: [{ name: "Meteor Data", extensions: ["dat"] }],
+        properties: ["openFile"]
+    });
+
+    if (canceled || filePaths.length === 0) return;
+    
+    const filePath = filePaths[0];
+    const inputPwd = await promptPassword('import');
+    if (!inputPwd) return; // Cancelled
+
+    try {
+        const content = fs.readFileSync(filePath, "utf-8");
+        const [saltB64, ivB64, tagB64, encryptedB64] = content.split(':');
+        
+        if (!saltB64 || !ivB64 || !tagB64 || !encryptedB64) {
+            throw new Error("Invalid format");
+        }
+
+        const salt = Buffer.from(saltB64, 'base64');
+        const iv = Buffer.from(ivB64, 'base64');
+        const tag = Buffer.from(tagB64, 'base64');
+        const encrypted = Buffer.from(encryptedB64, 'base64');
+        
+        const key = crypto.scryptSync(inputPwd, salt, 32);
+        const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+        decipher.setAuthTag(tag);
+        
+        const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]).toString('utf8');
+        const data = JSON.parse(decrypted);
+
+        if (!Array.isArray(data)) {
+            throw new Error("Invalid JSON structure");
+        }
+
+        let addedCount = 0;
+        data.forEach(item => {
+            // Global 'password' array is at line 129
+            const existsIndex = password.findIndex(p => p.userdata?.id === item.userdata?.id);
+            if (existsIndex !== -1) {
+                password.splice(existsIndex, 1);
+                addPassword(item, existsIndex);
+            } else {
+                addPassword(item);
+            }
+            addedCount++;
+        });
+
+        dialog.showMessageBox({ message: `${addedCount}件のパスワードをインポートしました。` });
+
+    } catch (err) {
+        console.error(err);
+        dialog.showErrorBox("エラー", "インポートに失敗しました。パスワードが間違っていないか確認してください。");
+    }
+}
+
 
 const templateMenu = [
 	...(process.platform == "darwin"
@@ -530,30 +579,43 @@ const templateMenu = [
 			{
 				label: "窓数・アドオン有無の切り替え",
 				click(item, focusedWindow) {
-					if (!isMainWindow) return;
-					if (focusedWindow) {
-						c2 = 1;
-						if (focusedWindow.isMaximized()) {
+                    const target = focusedWindow || mainWindow;
+					if (target) {
+						// Save current Main Window size
+						if (target.isMaximized()) {
 							setting.size.main.maximized = true;
 						} else {
 							setting.size.main.maximized = false;
-							setting.size.main.width =
-								focusedWindow.getBounds().width;
-							setting.size.main.height =
-								focusedWindow.getBounds().height;
+							setting.size.main.width = target.getBounds().width;
+							setting.size.main.height = target.getBounds().height;
 						}
-						focusedWindow.close();
-						start();
+                        
+                        // Restore Mode Select size
+                        if (setting.size.modeSelect.maximized) {
+                            target.maximize();
+                        } else {
+                            target.setSize(
+                                setting.size.modeSelect.width || 800, 
+                                setting.size.modeSelect.height || 600
+                            );
+                            target.center();
+                        }
+
+                        // Reload to resetting UI to Mode Select
+                        isMainWindow = false; // Reset game state flag
+						target.reload();
 					}
 				},
 			},
-			/*
-				{
-					label: "パスワードマネージャー",
-					click(item, focusedWindow) {
-					},
-				}
-			*/
+            { type: "separator" },
+            {
+                label: "パスワードをインポート",
+                click() { importPasswords(); }
+            },
+            {
+                label: "パスワードをエクスポート",
+                click() { exportPasswords(); }
+            }
 		],
 	},
 	{
