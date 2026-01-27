@@ -6,10 +6,10 @@
 	"scripts": {
 		"start": "electron ./src/main.js",
 		"build": "electron-builder",
-		"build-mac": "electron-builder -m --univarsal",
-		"build-win": "electron-builder -w --x64",
-		"build-linux": "electron-builder -l",
-		"build-all": "electron-builder -wml"
+		"build-mac": "electron-builder --mac",
+		"build-win": "electron-builder --win",
+		"build-linux": "electron-builder --linux",
+		"build-all": "electron-builder -mwl"
 	},
 	"dependencies": {
 		"electron-store": "8.x",
@@ -24,7 +24,7 @@
 		"appId": "electron.himaqueapp.meteor",
 		"productName": "Meteor",
 		"directories": {
-			"output": "release"
+			"output": "dist"
 		},
 		"files": [
 			"assets",
@@ -52,13 +52,15 @@
 				{
 					"target": "dmg",
 					"arch": [
-						"x64"
+						"x64",
+						"arm64"
 					]
 				},
 				{
-					"target": "pkg",
+					"target": "zip",
 					"arch": [
-						"universal"
+						"x64",
+						"arm64"
 					]
 				}
 			]
