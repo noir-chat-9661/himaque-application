@@ -82,7 +82,10 @@ autoUpdater.on('update-downloaded', () => {
 	autoUpdater.quitAndInstall();
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+	// Ensuring master key is loaded before starting
+	await initMasterKey();
+
 	if (!app.isPackaged) {
 		// Dev mode: Skip update check
 		createWindow();
@@ -139,7 +142,7 @@ const setting = (store.get('setting') as Setting) || defaultSetting;
 app.setAboutPanelOptions({
 	applicationName: 'ヒマクエ専用ブラウザ Meteor',
 	applicationVersion: pkg.version,
-	copyright: '©︎マグナム中野 (HIMACHATQUEST) 凶兆の黒猫(addon・Meteor)',
+	copyright: '©︎マグナム中野 (HIMACHATQUEST)\n凶兆の黒猫(addon・Meteor)',
 	authors: ['マグナム中野', '凶兆の黒猫'],
 	website: 'https://addon.pjeita.top/',
 });
@@ -191,7 +194,8 @@ function getPassword() {
 	return data;
 }
 
-keytar.getPassword(SERVICE, ACCOUNT).then(async (result) => {
+async function initMasterKey() {
+	const result = await keytar.getPassword(SERVICE, ACCOUNT);
 	if (result) {
 		masterkey = result;
 	} else {
@@ -201,12 +205,11 @@ keytar.getPassword(SERVICE, ACCOUNT).then(async (result) => {
 			await keytar.setPassword(SERVICE, ACCOUNT, legacyResult);
 		} else {
 			const masterKey = crypto.randomUUID();
-			keytar.setPassword(SERVICE, ACCOUNT, masterKey).then(() => {
-				masterkey = masterKey;
-			});
+			await keytar.setPassword(SERVICE, ACCOUNT, masterKey);
+			masterkey = masterKey;
 		}
 	}
-});
+}
 
 ipcMain.handle('password', () => {
 	return getPassword();
@@ -374,19 +377,17 @@ function createWindow() {
 			nodeIntegrationInSubFrames: true,
 			allowRunningInsecureContent: true,
 			webSecurity: false,
-		},
+		}
 	});
-	// global reference
-	// if (typeof nowWindow !== 'undefined') nowWindow = mainWindow;
-	// Typescript won't like undefined globals. Removing it or declaring it.
-	(global as any).nowWindow = mainWindow;
 
 	if (!app.isPackaged) mainWindow.webContents.openDevTools();
+
 
 	// Changed path to point to src from dist
 	mainWindow.loadFile(path.join(__dirname, '../src/index.html'));
 
 	mainWindow.once('ready-to-show', () => {
+		mainWindow?.setMenuBarVisibility(false);
 		if (mainWindow) {
 			mainWindow.show();
 			if (setting.size.modeSelect.maximized) mainWindow.maximize();
@@ -394,7 +395,6 @@ function createWindow() {
 	});
 
 	mainWindow.on('close', () => {
-		// Removed c2 check
 		app.exit();
 	});
 }
