@@ -1,4 +1,5 @@
 dist/
-src/hcq_script.js
+release/
+test/
 node_modules/
 .DS_Store

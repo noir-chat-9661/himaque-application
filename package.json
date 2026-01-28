@@ -1,34 +1,43 @@
 {
 	"name": "himaque-application",
-	"version": "5.9.0",
+	"version": "5.9.1",
 	"description": "application of HIMACHATQUEST",
-	"main": "./src/main.js",
+	"main": "./dist/main.js",
 	"scripts": {
-		"start": "electron ./src/main.js",
+		"start": "tsc && electron ./dist/main.js",
+		"build-ts": "tsc",
 		"build": "electron-builder",
 		"build-mac": "electron-builder --mac",
 		"build-win": "electron-builder --win",
 		"build-linux": "electron-builder --linux",
-		"build-all": "electron-builder -mwl"
+		"build-all": "electron-builder -mwl",
+		"check": "biome check src",
+		"format": "biome format src --write",
+		"lint": "biome lint src"
 	},
 	"dependencies": {
+		"electron-log": "^5.4.3",
 		"electron-store": "8.x",
 		"electron-updater": "^6.6.2",
 		"keytar": "^7.9.0"
 	},
 	"devDependencies": {
+		"@biomejs/biome": "^2.3.13",
+		"@types/node": "^25.0.10",
 		"electron": "^28.3.3",
-		"electron-builder": "^26.x"
+		"electron-builder": "^26.x",
+		"typescript": "^5.9.3"
 	},
 	"build": {
 		"appId": "electron.himaqueapp.meteor",
 		"productName": "Meteor",
 		"directories": {
-			"output": "dist"
+			"output": "release"
 		},
 		"files": [
 			"assets",
 			"src",
+			"dist",
 			"package.json",
 			"package-lock.json"
 		],
