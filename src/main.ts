@@ -80,7 +80,7 @@ autoUpdater.on('download-progress', (progressObj) => {
 });
 autoUpdater.on('update-downloaded', () => {
 	log.info('ダウンロード完了。再起動してインストールします。');
-	autoUpdater.quitAndInstall();
+	autoUpdater.quitAndInstall(true, true);
 });
 
 app.whenReady().then(async () => {
