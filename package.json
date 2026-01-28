@@ -1,6 +1,6 @@
 {
 	"name": "himaque-application",
-	"version": "5.9.1",
+	"version": "5.10.0",
 	"description": "application of HIMACHATQUEST",
 	"main": "./dist/main.js",
 	"scripts": {
@@ -92,7 +92,9 @@
 			"uninstallDisplayName": "Meteor Uninstaller",
 			"createDesktopShortcut": false,
 			"createStartMenuShortcut": true,
-			"shortcutName": "Meteor"
+			"shortcutName": "Meteor",
+			"artifactName": "${productName}-Setup-${version}.${ext}"
+
 		},
 		"publish": [
 			{

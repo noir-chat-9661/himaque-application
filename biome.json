@@ -26,7 +26,8 @@
 				"noArrayIndexKey": "off",
 				"noExplicitAny": "off",
 				"noAssignInExpressions": "off",
-				"noGlobalIsNan": "off"
+				"noGlobalIsNan": "off",
+				"noTsIgnore": "off"
 			},
 			"correctness": {
 				"useExhaustiveDependencies": "off"

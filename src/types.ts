@@ -33,5 +33,10 @@ export interface Setting {
 		modeSelect: SizeConfig;
 		main: SizeConfig;
 	};
+	proxy?: {
+		enable: boolean;
+		url: string;
+	};
 	addonData?: any[];
+	version?: string;
 }

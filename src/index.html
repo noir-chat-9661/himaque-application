@@ -7,6 +7,8 @@
 
     <!-- Styles -->
     <link rel="stylesheet" href="style.css" />
+
+    <script src="https://code.jquery.com/jquery-4.0.0.min.js"></script>
     
     <script>
         // Inline logic similar to renderer_ModeSelect.js but adapted
@@ -26,6 +28,51 @@
                     }[v];
             } else {
                 container.innerHTML = "";
+            }
+        }
+
+        function toggleProxyInput(enable) {
+            const input = document.getElementById("proxy-url");
+            const btn = document.getElementById("proxy-test-btn");
+            input.disabled = !enable;
+            btn.disabled = !enable;
+        }
+
+        function toggleAllAddons(enable) {
+            const checkboxes = document.querySelectorAll('#addonType input[type="checkbox"]');
+            checkboxes.forEach(cb => {
+                if (!cb.disabled) {
+                    cb.checked = enable;
+                    cb.parentElement.classList.toggle('checked', enable);
+                }
+            });
+        }
+
+        async function testProxy() {
+            const url = document.getElementById("proxy-url").value;
+            const resultDiv = document.getElementById("proxy-test-result");
+            
+            if (!url) {
+                resultDiv.textContent = "URLを入力してください";
+                resultDiv.className = "test-result test-error";
+                return;
+            }
+
+            resultDiv.textContent = "接続テスト中...";
+            resultDiv.className = "test-result test-loading";
+
+            if (window.electronAPI && window.electronAPI.testProxy) {
+                const success = await window.electronAPI.testProxy(url);
+                if (success) {
+                    resultDiv.textContent = "接続成功: can access himaquest.com";
+                    resultDiv.className = "test-result test-success";
+                } else {
+                    resultDiv.textContent = "接続失敗: タイムアウトまたはエラー";
+                    resultDiv.className = "test-result test-error";
+                }
+            } else {
+                resultDiv.textContent = "API未実装";
+                resultDiv.className = "test-result test-error";
             }
         }
 
@@ -54,6 +101,12 @@
                 const el = document.getElementById(`addon_${n}`);
                 if (el) obj.addonModules[n] = el.checked;
             });
+
+            // Proxy Settings
+            obj.proxy = {
+                enable: document.getElementById("proxy-enable").checked,
+                url: document.getElementById("proxy-url").value
+            };
             
             // Call exposed API from preload.js
             if (window.electronAPI && window.electronAPI.start) {
@@ -63,32 +116,60 @@
 
         // Called by preload.js when ready
         window.initModeSelectUI = (n) => {
+            if (n.version) {
+                 const vEl = document.getElementById("app-version");
+                 if (vEl) vEl.textContent = `v${n.version}`;
+            }
+
             document.getElementById("window").value = n.windowCount;
             WindowChange(n.windowCount);
             
             const addonRadio = [...document.getElementsByName("addon")].find((m) => m.value == `${n.addon}`);
-            if (addonRadio) addonRadio.checked = true;
-            
-            if (["2", "3", "4"].includes(n.windowCount)) {
-                const wt = document.getElementById("windowtype");
-                if (wt) wt.value = n.type;
+            if (addonRadio) {
+                addonRadio.checked = true;
+                // Trigger the UI change logic manually since programmatic check doesn't fire events
+                document.getElementById('addonType').style.display = n.addon ? 'grid' : 'none';
             }
             
-            document.getElementById("addonType").style.display = n.addon ? "" : "none";
-
-            const addonTypeContainer = document.getElementById("addonType");
+            if (["2", "3", "4"].includes(n.windowCount)) {
+                // Wait for WindowChange to populate layout options
+                setTimeout(() => {
+                    const wt = document.getElementById("windowtype");
+                    if (wt) wt.value = n.type;
+                }, 0);
+            }
+            
+            const addonContainer = document.querySelector("#addonType .addon-grid") || document.getElementById("addonType");
+            // Clear existing if any (except the header if it was inside, but now we have specific container)
+            addonContainer.innerHTML = "";
+            
             n.addonData.forEach(d => {
-                addonTypeContainer.innerHTML +=
-                    `<p>
-                        <label>
-                            <input type="checkbox" id="addon_${d.id}" ${
-                                n.addonModules[d.id] || d.id == "main" ? "checked" : ""
-                            } ${d.id == "main" ? "disabled" : ""} />
-                            ${d.name}
-                        </label>
-                    </p>`;
-                addonList.push(d.id);
+                const isChecked = n.addonModules[d.id] || d.id == "main";
+                const isDisabled = d.id == "main";
+                
+                addonContainer.innerHTML += `
+                    <label class="checkbox-card ${isChecked ? 'checked' : ''} ${isDisabled ? 'disabled' : ''}">
+                        <input type="checkbox" id="addon_${d.id}" 
+                            ${isChecked ? "checked" : ""} 
+                            ${isDisabled ? "disabled" : ""} 
+                            onchange="this.parentElement.classList.toggle('checked', this.checked)"
+                        />
+                        <span class="card-content">
+                            <span class="card-title">${d.name}</span>
+                        </span>
+                    </label>
+                `;
+                
+                if(!addonList.includes(d.id)) addonList.push(d.id);
             });
+
+            // Proxy Init
+            if (n.proxy) {
+                const enable = n.proxy.enable || false;
+                document.getElementById("proxy-enable").checked = enable;
+                document.getElementById("proxy-url").value = n.proxy.url || "";
+                toggleProxyInput(enable);
+            }
 
             if (n.mode == "window") {
                 document.getElementById("windowcount").style.display = "";
@@ -102,50 +183,104 @@
 <body>
     <!-- MODE SELECT VIEW -->
     <div id="view-mode-select">
-        <h1>モードを選択してください。</h1>
-        <h2>アドオン</h2>
-        <p>
-            <label onclick="document.getElementById('addonType').style.display = ''">
-                <input type="radio" name="addon" value="true" />あり
-            </label>&emsp;
-            <label>
-                <input type="radio" name="addon" value="false" onclick="document.getElementById('addonType').style.display = 'none'" checked />なし
-            </label>
-        </p>
-        <div id="addonType" style="display: none;">
-            <h2>使用アドオン選択</h2>
+        <div class="mode-select-container">
+            <h1 class="app-title">Meteor</h1>
+            <p class="app-subtitle">ヒマクエ専用ブラウザ <span id="app-version"></span></p>
+
+            <div class="setting-section">
+                <h2>モード選択</h2>
+                <div class="selection-group">
+                    <label class="radio-card">
+                        <input type="radio" name="mode" value="tab" onchange="setMode(0)" checked />
+                        <span class="card-content">
+                            <span class="card-title">タブ (推奨)</span>
+                            <span class="card-desc">Chromeのようにタブで管理します</span>
+                        </span>
+                    </label>
+                    <label class="radio-card">
+                        <input type="radio" name="mode" value="window" onchange="setMode(1)" />
+                        <span class="card-content">
+                            <span class="card-title">ウィンドウ</span>
+                            <span class="card-desc">従来のマルチウィンドウ方式</span>
+                        </span>
+                    </label>
+                </div>
+            </div>
+
+            <div id="windowcount" style="display: none;" class="setting-section fade-in">
+                <h2>ウィンドウ設定</h2>
+                <div class="input-group">
+                    <label>窓数</label>
+                    <select id="window" onchange="WindowChange(this.value)" class="styled-select">
+                        <option value="1" selected>1窓</option>
+                        <option value="2">2窓</option>
+                        <option value="3">3窓</option>
+                        <option value="4">4窓</option>
+                        <option value="5">5窓</option>
+                        <option value="6">6窓</option>
+                        <option value="7">7窓</option>
+                        <option value="8">8窓</option>
+                        <option value="9">9窓</option>
+                        <option value="10">10窓</option>
+                    </select>
+                </div>
+                <div id="windowmore" class="window-more-settings"></div>
+            </div>
+
+            <div class="setting-section">
+                <h2>アドオン (拡張機能)</h2>
+                <div class="selection-group">
+                    <label class="radio-card" onclick="document.getElementById('addonType').style.display = 'grid'">
+                        <input type="radio" name="addon" value="true" />
+                        <span class="card-content">
+                            <span class="card-title">あり</span>
+                            <span class="card-desc">アドオン機能を使用します</span>
+                        </span>
+                    </label>
+                    <label class="radio-card" onclick="document.getElementById('addonType').style.display = 'none'">
+                        <input type="radio" name="addon" value="false" checked />
+                        <span class="card-content">
+                            <span class="card-title">なし</span>
+                            <span class="card-desc">バニラ状態で起動します</span>
+                        </span>
+                    </label>
+                </div>
+            </div>
+
+            <div id="addonType" style="display: none;" class="setting-section fade-in">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <h2>使用するアドオン</h2>
+                    <div>
+                        <button onclick="toggleAllAddons(true)" class="secondary-btn" style="font-size: 0.8rem; padding: 4px 10px;">全て選択</button>
+                        <button onclick="toggleAllAddons(false)" class="secondary-btn" style="font-size: 0.8rem; padding: 4px 10px;">全て解除</button>
+                    </div>
+                </div>
+                <!-- JS will inject contents here, but we need to style them too -->
+                <div class="addon-grid"></div> 
+            </div>
+
+            <div class="setting-section">
+                <h2>プロキシ設定</h2>
+                <div class="input-group">
+                    <label class="checkbox-card" style="flex-grow: 0;">
+                        <input type="checkbox" id="proxy-enable" onchange="toggleProxyInput(this.checked)" />
+                        <span class="card-content">
+                            <span class="card-title">有効</span>
+                        </span>
+                    </label>
+                    <input type="text" id="proxy-url" placeholder="http://host:port" class="styled-input" disabled />
+                    <button onclick="testProxy()" id="proxy-test-btn" class="secondary-btn" disabled>接続テスト</button>
+                </div>
+                <div id="proxy-test-result" class="test-result"></div>
+                <div class="notice-box" style="font-size: 0.8rem; text-align: left; margin-top: 5px;">
+                    ※ 形式: <code>http://hostname:port</code> または <code>socks5://hostname:port</code>
+                </div>
+            </div>
+
+            <div class="action-area">
+                <button onclick="send()" class="start-btn">開始</button>
+            </div>
         </div>
-        <h2>モード選択</h2>
-        <p>
-            <label>
-                <input type="radio" name="mode" value="tab" onchange="setMode(0)" checked />タブ(新方式)
-            </label>&emsp;
-            <label>
-                <input type="radio" name="mode" value="window" onchange="setMode(1)" />ウィンドウ(従来方式)
-            </label>
-        </p>
-        <div id="windowcount" style="display: none;">
-            <h2>窓数(1～10)</h2>
-            <select id="window" onchange="WindowChange(this.value)">
-                <option value="1" selected>1窓</option>
-                <option value="2">2窓</option>
-                <option value="3">3窓</option>
-                <option value="4">4窓</option>
-                <option value="5">5窓</option>
-                <option value="6">6窓</option>
-                <option value="7">7窓</option>
-                <option value="8">8窓</option>
-                <option value="9">9窓</option>
-                <option value="10">10窓</option>
-            </select>
-            <br />
-            <div id="windowmore"></div>
-        </div>
-        <br />
-        <h2>プロキシ設定</h2>
-        <p>準備中</p>
-        <br />
-        <button onclick="send()" style="padding: 10px 20px; cursor: pointer;">開始</button>
     </div>
 
     <!-- TAB MODE VIEW -->

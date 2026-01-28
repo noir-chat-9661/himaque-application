@@ -6,6 +6,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 	window.electronAPI = {
 		start: (obj) => ipcRenderer.send('start', obj),
 		ready: () => ipcRenderer.sendSync('ready'),
+		testProxy: (url) => ipcRenderer.invoke('proxy-test', url),
 	};
 
 	// Attempt to initialize Mode Select UI if script is ready

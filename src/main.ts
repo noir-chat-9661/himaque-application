@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { app, BrowserWindow, dialog, ipcMain, Menu, net } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, net, shell } from 'electron';
 import log from 'electron-log';
 import Store from 'electron-store';
 import { autoUpdater } from 'electron-updater';
@@ -15,43 +15,80 @@ const store = new Store();
 
 // Log Setup
 log.transports.file.level = 'info';
-autoUpdater.logger = log;
+autoUpdater.autoDownload = false;
 
 autoUpdater.on('checking-for-update', () => {
 	log.info('アップデートを確認中...');
 });
 autoUpdater.on('update-available', (info) => {
 	log.info('アップデートあり:', info);
+	// Force Update Logic
+	if (process.platform === 'darwin') {
+		const url = `https://github.com/noir-chat-9661/himaque-application/releases/download/v${info.version}/Meteor-${info.version}-${process.arch}.dmg`;
+		log.info('Download URL:', url);
+
+		// Manual Download for Mac
+		const tempPath = path.join(app.getPath('temp'), `Meteor-${info.version}.dmg`);
+		const file = fs.createWriteStream(tempPath);
+
+		net.fetch(url)
+			.then(async (res) => {
+				if (!res.ok) throw new Error(`Unexpected response ${res.statusText}`);
+				// @ts-ignore: node-fetch/electron-fetch stream piping
+				if (res.body) {
+					// Electron's net.fetch returns a ReadableStream (web stream), not Node stream.
+					// We need to read it.
+					const reader = res.body.getReader();
+					while (true) {
+						const { done, value } = await reader.read();
+						if (done) break;
+						file.write(value);
+					}
+					file.end();
+				}
+			})
+			.then(() => {
+				file.close(() => {
+					log.info('Download complete. Opening DMG...');
+					shell.openPath(tempPath);
+					app.quit();
+				});
+			})
+			.catch((err) => {
+				log.error('Download failed:', err);
+				// Fallback to normal open if failed? Or just error.
+				// For forced update, we might want to retry or alert user.
+				// For now, let's open window so they aren't locked out?
+				createWindow();
+			});
+	} else {
+		// Windows/Linux - Auto Download
+		autoUpdater.downloadUpdate();
+	}
 });
 autoUpdater.on('update-not-available', (info) => {
 	log.info('アップデートなし:', info);
+	createWindow(); // Open app
 });
 autoUpdater.on('error', (err) => {
 	log.error('エラー発生:', err);
+	createWindow(); // Open app on error (fail-safe)
 });
 autoUpdater.on('download-progress', (progressObj) => {
 	log.info('ダウンロード中:', progressObj.percent + '%');
 });
 autoUpdater.on('update-downloaded', () => {
 	log.info('ダウンロード完了。再起動してインストールします。');
+	autoUpdater.quitAndInstall();
 });
 
 app.whenReady().then(() => {
-	createWindow();
-	autoUpdater.checkForUpdatesAndNotify();
-});
-
-autoUpdater.on('update-available', () => {
-	autoUpdater.downloadUpdate().then(() => {
-		dialog.showMessageBox({
-			buttons: ['OK'],
-			message:
-				'新しいバージョンが公開されています。\nダウンロード終了後、再起動します。\n(ダウンロードは少し時間がかかります)',
-		});
-	});
-});
-autoUpdater.on('update-downloaded', () => {
-	autoUpdater.quitAndInstall();
+	if (!app.isPackaged) {
+		// Dev mode: Skip update check
+		createWindow();
+	} else {
+		autoUpdater.checkForUpdates();
+	}
 });
 
 const state = {
@@ -107,8 +144,6 @@ app.setAboutPanelOptions({
 	website: 'https://addon.pjeita.top/',
 });
 
-let versionChecked = !app.isPackaged;
-
 const SERVICE = 'electron.himaqueapp.meteor' + (!app.isPackaged ? '_dev' : '');
 const ACCOUNT = 'meteor_masterkey';
 
@@ -156,14 +191,20 @@ function getPassword() {
 	return data;
 }
 
-keytar.getPassword(SERVICE, ACCOUNT).then((result) => {
+keytar.getPassword(SERVICE, ACCOUNT).then(async (result) => {
 	if (result) {
 		masterkey = result;
 	} else {
-		const masterKey = crypto.randomUUID();
-		keytar.setPassword(SERVICE, ACCOUNT, masterKey).then(() => {
-			masterkey = masterKey;
-		});
+		const legacyResult = await keytar.getPassword('_dev', ACCOUNT);
+		if (legacyResult) {
+			masterkey = legacyResult;
+			await keytar.setPassword(SERVICE, ACCOUNT, legacyResult);
+		} else {
+			const masterKey = crypto.randomUUID();
+			keytar.setPassword(SERVICE, ACCOUNT, masterKey).then(() => {
+				masterkey = masterKey;
+			});
+		}
 	}
 });
 
@@ -298,6 +339,7 @@ app.once('ready', async () => {
 			}
 			setting.addonData?.push(n);
 		});
+		setting.version = pkg.version;
 		e.returnValue = setting;
 		return setting;
 	});
@@ -305,20 +347,7 @@ app.once('ready', async () => {
 
 let mainWindow: BrowserWindow | null = null;
 
-app.on('ready', () => {
-	if (!versionChecked) autoUpdater.checkForUpdatesAndNotify();
-	createWindow();
-});
-
-autoUpdater.on('update-not-available', () => {
-	versionChecked = true;
-});
-autoUpdater.on('update-cancelled', () => {
-	versionChecked = true;
-});
-autoUpdater.on('error', () => {
-	versionChecked = true;
-});
+// app.on('ready') merged into app.whenReady() above
 
 // Rename 'start' to 'createWindow' to match call in app.whenReady
 function createWindow() {
@@ -371,7 +400,8 @@ function createWindow() {
 }
 
 // Handle "start" command from renderer (Mode Selection -> Game)
-ipcMain.on('start', (_, obj) => {
+// Handle "start" command from renderer (Mode Selection -> Game)
+ipcMain.on('start', async (_, obj) => {
 	if (!mainWindow) return;
 
 	// Update settings
@@ -380,10 +410,25 @@ ipcMain.on('start', (_, obj) => {
 	setting.type = obj?.type || 'a';
 	setting.addonModules = obj.addonModules;
 	setting.mode = obj.mode;
+	setting.proxy = obj.proxy; // Save proxy settings
 
 	// Reset names
 	for (let i = 0; i < hcqLinks.length; i++) hcqLinks[i].name = null;
 	store.set('setting', setting);
+
+	// Apply Proxy if enabled
+	try {
+		if (setting.proxy?.enable && setting.proxy.url) {
+			const proxyConfig = { proxyRules: setting.proxy.url };
+			await mainWindow.webContents.session.setProxy(proxyConfig);
+			log.info(`Proxy set to: ${setting.proxy?.url}`);
+		} else {
+			// Clear proxy if disabled
+			await mainWindow.webContents.session.setProxy({ proxyRules: '' });
+		}
+	} catch (err) {
+		log.error('Failed to set proxy:', err);
+	}
 
 	// Resize to Main Size
 	if (setting.size.main.maximized) {
@@ -399,7 +444,28 @@ ipcMain.on('start', (_, obj) => {
 	mainWindow.webContents.send('init-game', setting);
 });
 
+ipcMain.handle('proxy-test', async (_, proxyUrl) => {
+	if (!proxyUrl) return false;
+	try {
+		// Create a temporary session for testing
+		const { session } = require('electron');
+		const testSession = session.fromPartition('proxy-test-partition');
+		await testSession.setProxy({ proxyRules: proxyUrl });
+
+		// Attempt fetch
+		await net.fetch('https://himaquest.com', {
+			method: 'HEAD',
+			session: testSession,
+		} as any);
+		return true;
+	} catch (e) {
+		log.error('Proxy test failed:', e);
+		return false;
+	}
+});
+
 ipcMain.on('startgame', (e) => {
+	if (mainWindow) mainWindow.setMenuBarVisibility(true);
 	const returnValue = {
 		addon: setting.addon,
 		addonData: setting.addonData,
@@ -587,6 +653,7 @@ const templateMenu: Electron.MenuItemConstructorOptions[] = [
 							target.setSize(setting.size.modeSelect.width || 800, setting.size.modeSelect.height || 600);
 							target.center();
 						}
+						target.setMenuBarVisibility(false);
 
 						// Reload to resetting UI to Mode Select
 						isMainWindow = false; // Reset game state flag
