@@ -29,42 +29,59 @@ autoUpdater.on('update-available', (info) => {
         log.info('Download URL:', url);
         
         // Manual Download for Mac
-		const tempPath = path.join(app.getPath('temp'), `Meteor-${info.version}.dmg`);
-		const file = fs.createWriteStream(tempPath);
-
-		net.fetch(url)
-			.then(async (res) => {
-				if (!res.ok) throw new Error(`Unexpected response ${res.statusText}`);
-				// @ts-ignore: node-fetch/electron-fetch stream piping
-				if (res.body) {
-					// Electron's net.fetch returns a ReadableStream (web stream), not Node stream.
-					// We need to read it.
-					const reader = res.body.getReader();
-					while (true) {
-						const { done, value } = await reader.read();
-						if (done) break;
-						file.write(value);
-					}
-					file.end();
-				}
-			})
-			.then(() => {
-				file.close(() => {
-					log.info('Download complete. Opening DMG...');
-					shell.openPath(tempPath);
-					app.quit();
-				});
-			})
-			.catch((err) => {
-				log.error('Download failed:', err);
-				// Fallback to normal open if failed? Or just error.
-				// For forced update, we might want to retry or alert user.
-				// For now, let's open window so they aren't locked out?
-				createWindow();
-			});
+        dialog.showMessageBox({
+            type: 'info',
+            buttons: ['OK'],
+            title: 'アップデート',
+            message: '新しいバージョンが見つかりました。\nOKを押すとダウンロードを開始します。\n完了後にインストーラが起動します。',
+        }).then(() => {
+            const tempPath = path.join(app.getPath('temp'), `Meteor-${info.version}.dmg`);
+            const file = fs.createWriteStream(tempPath);
+    
+            net.fetch(url)
+                .then(async (res) => {
+                    if (!res.ok) throw new Error(`Unexpected response ${res.statusText}`);
+                    // @ts-ignore: node-fetch/electron-fetch stream piping
+                    if (res.body) {
+                        // Electron's net.fetch returns a ReadableStream (web stream), not Node stream.
+                        // We need to read it.
+                        const reader = res.body.getReader();
+                        while (true) {
+                            const { done, value } = await reader.read();
+                            if (done) break;
+                            file.write(value);
+                        }
+                        file.end();
+                    }
+                })
+                .then(() => {
+                    file.close(() => {
+                        log.info('Download complete. Opening DMG...');
+                        shell.openPath(tempPath);
+                        app.quit();
+                    });
+                })
+                .catch((err) => {
+                    log.error('Download failed:', err);
+                    // Fallback to normal open if failed? Or just error.
+                    // For forced update, we might want to retry or alert user. 
+                    // For now, let's open window so they aren't locked out?
+                    createWindow();
+                });
+        });
 	} else {
 		// Windows/Linux - Auto Download
-		autoUpdater.downloadUpdate();
+		dialog
+			.showMessageBox({
+				type: 'info',
+				buttons: ['OK'],
+				title: 'アップデート',
+				message:
+					'新しいバージョンが見つかりました。\nOKを押すとバックグラウンドでダウンロードを開始します。\n完了後に自動で再起動します。',
+			})
+			.then(() => {
+				autoUpdater.downloadUpdate();
+			});
 	}
 });
 autoUpdater.on('update-not-available', (info) => {
@@ -99,10 +116,12 @@ const state = {
 	use: {
 		exitField: false,
 		partyReady: false,
+		leaveParty: false,
 	},
 	links: {
 		exitField: [] as string[],
 		partyReady: [] as string[],
+		leaveParty: [] as string[],
 	},
 };
 
@@ -299,6 +318,14 @@ ipcMain.on('state', (_, d) => {
 			state.links.partyReady.length = 0;
 		}, 1500);
 	}
+	if (d.type === 'leaveParty') {
+		state.use.leaveParty = true;
+		state.links.leaveParty.length = 0;
+		setTimeout(() => {
+			state.use.leaveParty = false;
+			state.links.leaveParty.length = 0;
+		}, 1500);
+	}
 });
 ipcMain.handle('state', (_, d) => {
 	const { url, name } = d;
@@ -313,6 +340,12 @@ ipcMain.handle('state', (_, d) => {
 		if (!state.links.partyReady.includes(url)) {
 			state.links.partyReady.push(url);
 			returnValue.partyReady = true;
+		}
+	}
+	if (state.use.leaveParty) {
+		if (!state.links.leaveParty.includes(url)) {
+			state.links.leaveParty.push(url);
+			returnValue.leaveParty = true;
 		}
 	}
 	if (setting.mode === 'tab') {
@@ -378,7 +411,8 @@ function createWindow() {
 			nodeIntegrationInSubFrames: true,
 			allowRunningInsecureContent: true,
 			webSecurity: false,
-		}
+		},
+		autoHideMenuBar: true,
 	});
 
 	if (!app.isPackaged) mainWindow.webContents.openDevTools();
@@ -389,8 +423,9 @@ function createWindow() {
 
 	mainWindow.once('ready-to-show', () => {
 		if (mainWindow) {
-			mainWindow.show();
 			mainWindow.setMenuBarVisibility(false);
+			mainWindow.setAutoHideMenuBar(true);
+			mainWindow.show();
 			if (setting.size.modeSelect.maximized) mainWindow.maximize();
 		}
 	});
@@ -464,7 +499,10 @@ ipcMain.handle('proxy-test', async (_, proxyUrl) => {
 });
 
 ipcMain.on('startgame', (e) => {
-	if (mainWindow) mainWindow.setMenuBarVisibility(true);
+	if (mainWindow) {
+		mainWindow.setMenuBarVisibility(true);
+		mainWindow.setAutoHideMenuBar(false);
+	}
 	const returnValue = {
 		addon: setting.addon,
 		addonData: setting.addonData,
@@ -653,6 +691,7 @@ const templateMenu: Electron.MenuItemConstructorOptions[] = [
 							target.center();
 						}
 						target.setMenuBarVisibility(false);
+						target.setAutoHideMenuBar(true);
 
 						// Reload to resetting UI to Mode Select
 						isMainWindow = false; // Reset game state flag
@@ -706,6 +745,20 @@ const templateMenu: Electron.MenuItemConstructorOptions[] = [
 					}
 				},
 			},
+			{
+				label: '一斉パーティ退出',
+				click(_, focusedWindow) {
+					if (!isMainWindow) return;
+					if (focusedWindow) {
+						state.use.leaveParty = true;
+						state.links.leaveParty.length = 0;
+						setTimeout(() => {
+							state.use.leaveParty = false;
+							state.links.leaveParty.length = 0;
+						}, 1500);
+					}
+				},
+			}
 		],
 	},
 ];

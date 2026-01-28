@@ -1,11 +1,11 @@
 {
 	"name": "himaque-application",
-	"version": "5.10.3",
+	"version": "5.11.1",
 	"description": "application of HIMACHATQUEST",
 	"main": "./dist/main.js",
 	"scripts": {
-		"start": "tsc && electron ./dist/main.js",
-		"build-ts": "tsc",
+		"ready": "electron-builder install-app-deps && tsc",
+		"start": "electron ./dist/main.js",
 		"build": "electron-builder",
 		"build-mac": "electron-builder --mac",
 		"build-win": "electron-builder --win",
@@ -60,13 +60,6 @@
 			"target": [
 				{
 					"target": "dmg",
-					"arch": [
-						"x64",
-						"arm64"
-					]
-				},
-				{
-					"target": "zip",
 					"arch": [
 						"x64",
 						"arm64"

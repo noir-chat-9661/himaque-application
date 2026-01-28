@@ -588,6 +588,11 @@ window.addEventListener('DOMContentLoaded', async () => {
 					ipcRenderer.send('state', { type: 'exitField' });
 					return;
 				}
+				if ((isCmdOrCtrl && e.key === 'l') || e.key === 'F3') {
+					e.preventDefault();
+					ipcRenderer.send('state', { type: 'leaveParty' });
+					return;
+				}
 			};
 			document.addEventListener('keydown', f.keydownEvent);
 
@@ -1558,6 +1563,13 @@ window.addEventListener('DOMContentLoaded', async () => {
 			});
 			return;
 		}
+		if ((e.ctrlKey && e.key === 'l') || e.key === 'F3') {
+			e.preventDefault();
+			ipcRenderer.send('state', {
+				type: 'leaveParty',
+			});
+			return;
+		}
 		if (e.ctrlKey && e.key === 'm') {
 			e.preventDefault();
 			bgmflg = 0;
@@ -1594,6 +1606,9 @@ window.addEventListener('DOMContentLoaded', async () => {
 							}
 						}, 500);
 					}
+				}
+				if (s.leaveParty) {
+					if (myparty) PartyExit();
 				}
 			});
 	}, 500);
