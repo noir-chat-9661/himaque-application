@@ -22,12 +22,13 @@ autoUpdater.on('checking-for-update', () => {
 });
 autoUpdater.on('update-available', (info) => {
 	log.info('アップデートあり:', info);
-	// Force Update Logic
-	if (process.platform === 'darwin') {
-		const url = `https://github.com/noir-chat-9661/himaque-application/releases/download/v${info.version}/Meteor-${info.version}-${process.arch}.dmg`;
-		log.info('Download URL:', url);
-
-		// Manual Download for Mac
+	    // Force Update Logic
+    if (process.platform === 'darwin') {
+        const archSuffix = process.arch === 'arm64' ? '-arm64' : '';
+        const url = `https://github.com/noir-chat-9661/himaque-application/releases/download/v${info.version}/Meteor-${info.version}${archSuffix}.dmg`;
+        log.info('Download URL:', url);
+        
+        // Manual Download for Mac
 		const tempPath = path.join(app.getPath('temp'), `Meteor-${info.version}.dmg`);
 		const file = fs.createWriteStream(tempPath);
 
@@ -387,9 +388,9 @@ function createWindow() {
 	mainWindow.loadFile(path.join(__dirname, '../src/index.html'));
 
 	mainWindow.once('ready-to-show', () => {
-		mainWindow?.setMenuBarVisibility(false);
 		if (mainWindow) {
 			mainWindow.show();
+			mainWindow.setMenuBarVisibility(false);
 			if (setting.size.modeSelect.maximized) mainWindow.maximize();
 		}
 	});
@@ -399,8 +400,6 @@ function createWindow() {
 	});
 }
 
-// Handle "start" command from renderer (Mode Selection -> Game)
-// Handle "start" command from renderer (Mode Selection -> Game)
 ipcMain.on('start', async (_, obj) => {
 	if (!mainWindow) return;
 

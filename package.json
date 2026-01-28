@@ -1,6 +1,6 @@
 {
 	"name": "himaque-application",
-	"version": "5.10.2",
+	"version": "5.10.3",
 	"description": "application of HIMACHATQUEST",
 	"main": "./dist/main.js",
 	"scripts": {
